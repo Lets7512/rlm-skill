@@ -74,10 +74,43 @@ function patternAdvice(pattern: number, sizeStr: string, filePath: string): stri
 }
 
 export const RLMInterceptor: Plugin = async (ctx) => {
+  // Log plugin initialization
+  if (ctx.client?.app?.log) {
+    await ctx.client.app.log({
+      body: {
+        service: "rlm-interceptor",
+        level: "info",
+        message: "RLM Interceptor plugin loaded",
+      },
+    })
+  }
+
+  // Debug: log to file so we can verify plugin loads
+  try {
+    const debugDir = path.join(os.homedir(), ".rlm", "debug")
+    fs.mkdirSync(debugDir, { recursive: true })
+    fs.appendFileSync(
+      path.join(debugDir, "interceptor.log"),
+      `${new Date().toISOString()} PLUGIN LOADED\n`
+    )
+  } catch (e) {}
+
   return {
     "tool.execute.before": async (input: any, output: any) => {
-      // Intercept read tool — block large files
-      if (input.tool === "read") {
+      // Debug: log every tool call so we know the exact tool names
+      try {
+        const debugDir = path.join(os.homedir(), ".rlm", "debug")
+        fs.mkdirSync(debugDir, { recursive: true })
+        fs.appendFileSync(
+          path.join(debugDir, "interceptor.log"),
+          `${new Date().toISOString()} TOOL: ${input.tool} ARGS: ${JSON.stringify(output.args).slice(0, 200)}\n`
+        )
+      } catch (e) {}
+
+      // Intercept read tool — match any case variation
+      const toolLower = (input.tool || "").toLowerCase()
+
+      if (toolLower === "read" || toolLower === "file_read" || toolLower === "readfile") {
         const filePath = output.args.filePath || output.args.file_path
         if (!filePath) return
 
@@ -97,7 +130,7 @@ export const RLMInterceptor: Plugin = async (ctx) => {
       }
 
       // Intercept bash tool — warn on large-output commands, track python open()
-      if (input.tool === "bash") {
+      if (toolLower === "bash" || toolLower === "shell" || toolLower === "execute") {
         const command = output.args.command
         if (!command) return
 
@@ -151,7 +184,7 @@ export const RLMInterceptor: Plugin = async (ctx) => {
       }
 
       // Block webfetch tool
-      if (input.tool === "webfetch" || input.tool === "web_fetch") {
+      if (toolLower === "webfetch" || toolLower === "web_fetch" || toolLower === "fetch") {
         throw new Error("[RLM] WebFetch is blocked. Download via python -c using urllib/requests, save to a local file, then process through the RLM protocol.")
       }
     },
