@@ -66,6 +66,14 @@ def compute_stats(events):
     total_raw_bytes = 0
     total_events = len(events)
     by_pattern = {1: 0, 2: 0, 3: 0}
+    by_protocol = {
+        "rlm_metadata": 0,
+        "rlm_peek": 0,
+        "rlm_search": 0,
+        "rlm_analyze": 0,
+        "rlm_submit": 0,
+        "rlm_cli": 0,
+    }
 
     for e in events:
         size = e.get("size_bytes", 0)
@@ -73,6 +81,9 @@ def compute_stats(events):
         p = e.get("pattern", 0)
         if p in by_pattern:
             by_pattern[p] += 1
+        evt = e.get("event", "")
+        if evt in by_protocol:
+            by_protocol[evt] += 1
 
     # Estimate: 1 token ~ 4 bytes. RLM typically reduces output to ~2% of input.
     raw_tokens = total_raw_bytes // 4
@@ -88,6 +99,7 @@ def compute_stats(events):
         "saved_tokens": saved_tokens,
         "savings_pct": (saved_tokens / raw_tokens * 100) if raw_tokens > 0 else 0,
         "by_pattern": by_pattern,
+        "by_protocol": by_protocol,
     }
 
 
@@ -146,6 +158,25 @@ def print_dashboard(stats):
         print("║  (no pattern-specific data)                      ║")
 
     print("║                                                  ║")
+
+    if any(v > 0 for v in stats.get("by_protocol", {}).values()):
+        print("╠──────────────────────────────────────────────────╣")
+        print("║  Protocol Steps                                  ║")
+        print("║                                                  ║")
+        step_labels = {
+            "rlm_metadata": "METADATA",
+            "rlm_peek": "PEEK",
+            "rlm_search": "SEARCH",
+            "rlm_analyze": "ANALYZE (sub-queries)",
+            "rlm_submit": "SUBMIT",
+            "rlm_cli": "CLI (rlm-cli)",
+        }
+        for key, label in step_labels.items():
+            count = stats["by_protocol"].get(key, 0)
+            if count > 0:
+                print(f"║  {label:<30} {count:>4}x       ║")
+        print("║                                                  ║")
+
     print("╚══════════════════════════════════════════════════╝")
     print()
 
