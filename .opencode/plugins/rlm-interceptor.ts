@@ -5,6 +5,8 @@ import path from "path"
 import os from "os"
 import { ContentStore } from "./rlm-store"
 import { execute, executeFile } from "./rlm-executor"
+import http from "http"
+import https from "https"
 
 const SIZE_THRESHOLDS = {
   SINGLE_PASS: 5 * 1024,         // 5 KB — steps 1-3
@@ -95,6 +97,44 @@ let store: ContentStore | null = null
 function getStore(): ContentStore {
   if (!store) store = new ContentStore()
   return store
+}
+
+function fetchUrl(url: string): Promise<{ body: string; contentType: string; statusCode: number }> {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith("https") ? https : http
+    mod.get(url, { headers: { "User-Agent": "RLM-Skill/0.4" } }, (res: any) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchUrl(res.headers.location).then(resolve, reject)
+      }
+      const chunks: Buffer[] = []
+      res.on("data", (c: Buffer) => chunks.push(c))
+      res.on("end", () => {
+        resolve({
+          body: Buffer.concat(chunks).toString("utf-8"),
+          contentType: res.headers["content-type"] || "",
+          statusCode: res.statusCode,
+        })
+      })
+      res.on("error", reject)
+    }).on("error", reject)
+  })
+}
+
+function htmlToText(html: string): string {
+  let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+  text = text.replace(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi, "\n## $1\n")
+  text = text.replace(/<li[^>]*>(.*?)<\/li>/gi, "- $1\n")
+  text = text.replace(/<br\s*\/?>/gi, "\n")
+  text = text.replace(/<p[^>]*>(.*?)<\/p>/gi, "\n$1\n")
+  text = text.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, "\n```\n$1\n```\n")
+  text = text.replace(/<code[^>]*>(.*?)<\/code>/gi, "`$1`")
+  text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "[$2]($1)")
+  text = text.replace(/<[^>]+>/g, "")
+  text = text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+  text = text.replace(/\n{3,}/g, "\n\n").trim()
+  return text
 }
 
 export const RLMInterceptor: Plugin = async (ctx) => {
@@ -264,11 +304,11 @@ print('Use rlm_index to index it for search.')
 
       rlm_search: tool({
         description:
-          "Search the RLM knowledge base. Returns matching chunks ranked by BM25 relevance. Use after rlm_index to query indexed content.",
+          "Search the RLM knowledge base. Returns smart snippets (windows around matching terms) ranked by BM25 with 3-layer fallback (porter/trigram/fuzzy). Batch all queries in one call.",
         args: {
           queries: tool.schema
             .array(tool.schema.string())
-            .describe("Search queries (BM25 OR semantics)"),
+            .describe("Search queries (BM25 OR semantics, batch all in one call)"),
           source: tool.schema
             .string()
             .optional()
@@ -279,7 +319,7 @@ print('Use rlm_index to index it for search.')
           logEvent("rlm_search", { queries: args.queries, source: args.source })
 
           const s = getStore()
-          const results = s.search(args.queries, args.source)
+          const results = s.searchWithSnippets(args.queries, args.source)
           if (results.length === 0) return "No results found."
 
           return results
@@ -319,6 +359,100 @@ print('Use rlm_index to index it for search.')
 
           const stats = s.stats()
           return `Indexed ${count} chunks as "${args.source}". KB now has ${stats.chunks} chunks from ${stats.sources} sources (${stats.dbSize}).`
+        },
+      }),
+
+      rlm_batch_execute: tool({
+        description:
+          "Run multiple commands AND search multiple queries in ONE call. Each command runs in a sandbox (stdout-only). Search queries run against the knowledge base. Saves tool-call overhead.",
+        args: {
+          commands: tool.schema
+            .array(
+              tool.schema.object({
+                language: tool.schema.enum(["python", "javascript", "shell"]),
+                code: tool.schema.string(),
+              })
+            )
+            .optional()
+            .describe("Commands to execute in sandbox"),
+          queries: tool.schema
+            .array(tool.schema.string())
+            .optional()
+            .describe("Search queries for knowledge base"),
+          source: tool.schema
+            .string()
+            .optional()
+            .describe("Source filter for search queries"),
+        },
+        async execute(args) {
+          logEvent("rlm_batch_execute", {
+            commands: (args.commands || []).length,
+            queries: (args.queries || []).length,
+          })
+
+          const parts: string[] = []
+
+          if (args.commands && args.commands.length > 0) {
+            for (let i = 0; i < args.commands.length; i++) {
+              const cmd = args.commands[i]
+              const result = execute(cmd.language, cmd.code)
+              let output = result.stdout
+              if (result.stderr) output += "\n[stderr] " + result.stderr
+              if (result.exitCode !== 0) output += `\n[exit code: ${result.exitCode}]`
+              parts.push(`=== Command ${i + 1} (${cmd.language}) ===\n${output || "(no output)"}`)
+            }
+          }
+
+          if (args.queries && args.queries.length > 0) {
+            const s = getStore()
+            const results = s.searchWithSnippets(args.queries, args.source)
+            if (results.length === 0) {
+              parts.push("=== Search ===\nNo results found.")
+            } else {
+              const text = results
+                .map((r, idx) => `[${idx + 1}] (source: ${r.source})\n${r.text}`)
+                .join("\n\n")
+              parts.push("=== Search ===\n" + text)
+            }
+          }
+
+          return parts.join("\n\n") || "(nothing to execute)"
+        },
+      }),
+
+      rlm_fetch_and_index: tool({
+        description:
+          "Fetch a URL, convert HTML to text, chunk and index into the knowledge base. The raw page never enters context. Use rlm_search afterwards to query the indexed content.",
+        args: {
+          url: tool.schema.string().describe("URL to fetch"),
+          source: tool.schema.string().describe("Label for indexed content (used in search filtering)"),
+        },
+        async execute(args) {
+          logEvent("rlm_fetch_and_index", { url: args.url, source: args.source })
+
+          try {
+            const resp = await fetchUrl(args.url)
+            if (resp.statusCode >= 400) {
+              return `HTTP ${resp.statusCode} fetching ${args.url}`
+            }
+
+            let content = resp.body
+            const isHtml = resp.contentType.includes("html") || content.trim().startsWith("<")
+            if (isHtml) {
+              content = htmlToText(content)
+            }
+
+            const s = getStore()
+            const count = s.index(args.source, content)
+            const stats = s.stats()
+            const sizeStr = content.length >= 1024
+              ? (content.length / 1024).toFixed(1) + "KB"
+              : content.length + "B"
+
+            return `Fetched ${args.url} (${sizeStr}${isHtml ? ", HTML->text" : ""})\nIndexed ${count} chunks as "${args.source}". KB has ${stats.chunks} chunks from ${stats.sources} sources (${stats.dbSize}).\nUse rlm_search to query this content.`
+          } catch (e: any) {
+            return "Fetch error: " + e.message
+          }
         },
       }),
     },

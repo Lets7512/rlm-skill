@@ -134,6 +134,54 @@ export class ContentStore {
     return { sources, chunks, dbSize }
   }
 
+  smartSnippet(text: string, query: string, windowSize: number = 200): string {
+    const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2)
+    if (words.length === 0) return text.slice(0, windowSize)
+
+    const lower = text.toLowerCase()
+    const positions: number[] = []
+    for (const w of words) {
+      const idx = lower.indexOf(w)
+      if (idx !== -1) positions.push(idx)
+    }
+    if (positions.length === 0) return text.slice(0, windowSize)
+
+    positions.sort((a, b) => a - b)
+    const snippets: { start: number; end: number }[] = []
+    const half = Math.floor(windowSize / 2)
+    for (const pos of positions) {
+      const start = Math.max(0, pos - half)
+      const end = Math.min(text.length, pos + half)
+      if (snippets.length > 0 && start <= snippets[snippets.length - 1].end) {
+        snippets[snippets.length - 1].end = end
+      } else {
+        snippets.push({ start, end })
+      }
+    }
+
+    return snippets
+      .map((s) => {
+        const prefix = s.start > 0 ? "..." : ""
+        const suffix = s.end < text.length ? "..." : ""
+        return prefix + text.slice(s.start, s.end).trim() + suffix
+      })
+      .join("\n\n")
+  }
+
+  searchWithSnippets(
+    queries: string[],
+    source?: string,
+    limit: number = 5
+  ): Array<{ source: string; text: string; score: number }> {
+    const results = this.search(queries, source, limit)
+    const queryStr = queries.join(" ")
+    return results.map((r) => ({
+      source: r.source,
+      text: this.smartSnippet(r.text, queryStr),
+      score: r.score,
+    }))
+  }
+
   close() {
     this.db.close()
   }

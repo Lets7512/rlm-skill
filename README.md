@@ -70,7 +70,9 @@ The plugin provides MCP tools (Claude Code) and custom tools (OpenCode):
 | `rlm_execute` | Run code in a sandboxed subprocess (python/js/shell). Only stdout enters context. |
 | `rlm_execute_file` | Run code against a file. Content loaded as `FILE_CONTENT` variable, never enters context. |
 | `rlm_index` | Index file content into an FTS5 knowledge base for later search. |
-| `rlm_search` | Search indexed content with BM25 ranking + 3-layer fallback (porter/trigram/fuzzy). |
+| `rlm_search` | Search indexed content with smart snippets + BM25 ranking + 3-layer fallback (porter/trigram/fuzzy). |
+| `rlm_batch_execute` | Run multiple commands + search queries in ONE call. Saves tool-call overhead. |
+| `rlm_fetch_and_index` | Fetch URL, convert HTML to text, chunk and index. Raw page never enters context. |
 | `rlm_stats` | Show knowledge base statistics. |
 
 ### CLI Tool

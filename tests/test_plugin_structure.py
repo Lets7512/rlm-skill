@@ -143,6 +143,8 @@ def test_opencode_interceptor_has_tools():
     assert "rlm_execute" in content, "Must register rlm_execute tool"
     assert "rlm_search" in content, "Must register rlm_search tool"
     assert "rlm_index" in content, "Must register rlm_index tool"
+    assert "rlm_batch_execute" in content, "Must register rlm_batch_execute tool"
+    assert "rlm_fetch_and_index" in content, "Must register rlm_fetch_and_index tool"
 
 
 def test_mcp_server_exists():
@@ -152,6 +154,8 @@ def test_mcp_server_exists():
     assert "rlm_execute" in content, "MCP server must provide rlm_execute tool"
     assert "rlm_search" in content, "MCP server must provide rlm_search tool"
     assert "rlm_index" in content, "MCP server must provide rlm_index tool"
+    assert "rlm_batch_execute" in content, "MCP server must provide rlm_batch_execute tool"
+    assert "rlm_fetch_and_index" in content, "MCP server must provide rlm_fetch_and_index tool"
 
 
 def test_mcp_store_exists():
@@ -160,6 +164,8 @@ def test_mcp_store_exists():
     content = store.read_text()
     assert "ContentStore" in content, "Must export ContentStore class"
     assert "fts5" in content.lower(), "Must use FTS5"
+    assert "smartSnippet" in content, "Must have smart snippet extraction"
+    assert "searchWithSnippets" in content, "Must have search with snippets"
 
 
 def test_plugin_json_has_mcp():

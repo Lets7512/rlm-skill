@@ -130,6 +130,61 @@ export class ContentStore {
     return { sources: sources, chunks: chunks, dbSize: dbSize };
   }
 
+  /**
+   * Smart snippet extraction — returns windows around matching query terms
+   * instead of full chunks. Finds where terms appear and extracts context.
+   */
+  smartSnippet(text, query, windowSize) {
+    windowSize = windowSize || 200;
+    var words = query.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; });
+    if (words.length === 0) return text.slice(0, windowSize);
+
+    var lower = text.toLowerCase();
+    var positions = [];
+    for (var i = 0; i < words.length; i++) {
+      var idx = lower.indexOf(words[i]);
+      if (idx !== -1) positions.push(idx);
+    }
+    if (positions.length === 0) return text.slice(0, windowSize);
+
+    // Sort positions, merge overlapping windows
+    positions.sort(function (a, b) { return a - b; });
+    var snippets = [];
+    var half = Math.floor(windowSize / 2);
+    for (var j = 0; j < positions.length; j++) {
+      var start = Math.max(0, positions[j] - half);
+      var end = Math.min(text.length, positions[j] + half);
+      // Merge with previous if overlapping
+      if (snippets.length > 0 && start <= snippets[snippets.length - 1].end) {
+        snippets[snippets.length - 1].end = end;
+      } else {
+        snippets.push({ start: start, end: end });
+      }
+    }
+
+    return snippets.map(function (s) {
+      var prefix = s.start > 0 ? "..." : "";
+      var suffix = s.end < text.length ? "..." : "";
+      return prefix + text.slice(s.start, s.end).trim() + suffix;
+    }).join("\n\n");
+  }
+
+  /**
+   * Search with smart snippets — returns snippet-extracted results.
+   */
+  searchWithSnippets(queries, source, limit) {
+    var self = this;
+    var results = this.search(queries, source, limit);
+    var queryStr = queries.join(" ");
+    return results.map(function (r) {
+      return {
+        source: r.source,
+        text: self.smartSnippet(r.text, queryStr),
+        score: r.score,
+      };
+    });
+  }
+
   close() {
     this.db.close();
   }
