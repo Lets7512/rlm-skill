@@ -75,6 +75,12 @@ def compute_stats(events):
         "rlm_submit": 0,
         "rlm_cli": 0,
     }
+    by_plugin = {
+        "rlm_intercept_rewrite": 0,
+        "rlm_execute": 0,
+        "rlm_index": 0,
+        "rlm_search": 0,
+    }
 
     for e in events:
         size = e.get("size_bytes", 0)
@@ -85,6 +91,8 @@ def compute_stats(events):
         evt = e.get("event", "")
         if evt in by_protocol:
             by_protocol[evt] += 1
+        if evt in by_plugin:
+            by_plugin[evt] += 1
 
     # Estimate: 1 token ~ 4 bytes. RLM typically reduces output to ~2% of input.
     raw_tokens = total_raw_bytes // 4
@@ -101,6 +109,7 @@ def compute_stats(events):
         "savings_pct": (saved_tokens / raw_tokens * 100) if raw_tokens > 0 else 0,
         "by_pattern": by_pattern,
         "by_protocol": by_protocol,
+        "by_plugin": by_plugin,
     }
 
 
@@ -175,6 +184,22 @@ def print_dashboard(stats):
         }
         for key, label in step_labels.items():
             count = stats["by_protocol"].get(key, 0)
+            if count > 0:
+                print(f"║  {label:<30} {count:>4}x       ║")
+        print("║                                                  ║")
+
+    if any(v > 0 for v in stats.get("by_plugin", {}).values()):
+        print("╠──────────────────────────────────────────────────╣")
+        print("║  Plugin Activity                                 ║")
+        print("║                                                  ║")
+        plugin_labels = {
+            "rlm_intercept_rewrite": "Intercepted & Rewritten",
+            "rlm_execute": "Sandbox Executions",
+            "rlm_index": "KB Indexing",
+            "rlm_search": "KB Searches",
+        }
+        for key, label in plugin_labels.items():
+            count = stats["by_plugin"].get(key, 0)
             if count > 0:
                 print(f"║  {label:<30} {count:>4}x       ║")
         print("║                                                  ║")

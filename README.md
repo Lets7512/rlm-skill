@@ -25,9 +25,11 @@ claude --plugin-dir /path/to/rlm-skill
 cp -r .opencode/agents/ .opencode/commands/ .opencode/plugins/ ~/.config/opencode/
 
 # Or use from project root (auto-detected from .opencode/)
+# Install plugin dependencies
+cd .opencode && npm install
 ```
 
-The **RLM interceptor plugin** (`plugins/rlm-interceptor.ts`) automatically blocks large file reads and suggests the RLM protocol — no manual invocation needed.
+The **RLM interceptor plugin** (`plugins/rlm-interceptor.ts`) automatically rewrites large file reads into metadata summaries and provides custom tools for sandbox execution and knowledge base search.
 
 In OpenCode, use `Ctrl+K` then select:
 - `project:rlm` — invoke RLM for large-context tasks
@@ -42,7 +44,7 @@ uv pip install -e .
 
 ## Usage
 
-The skill activates automatically when large-context tasks are detected. The PreToolUse hook warns before reading large files and suggests writing code to process them instead.
+The skill activates automatically when large-context tasks are detected. The interceptor silently rewrites tool calls to prevent raw data from entering context.
 
 Invoke directly in Claude Code:
 ```
@@ -58,6 +60,16 @@ Check token savings:
 ```
 /rlm:stats
 ```
+
+### Custom Tools (OpenCode)
+
+The plugin registers three custom tools available to the model:
+
+| Tool | Purpose |
+|------|---------|
+| `rlm_execute` | Run code in a sandboxed subprocess (python/js/shell). Only stdout enters context. |
+| `rlm_index` | Index file content into an FTS5 knowledge base for later search. |
+| `rlm_search` | Search indexed content with BM25 ranking + 3-layer fallback (porter/trigram/fuzzy). |
 
 ### CLI Tool
 
@@ -78,12 +90,12 @@ rlm-cli query "Find bugs" --repo . --backend openai --model Qwen/Qwen3-8B --base
 
 **Claude Code** — PreToolUse hook (`hooks/pretooluse-rlm.mjs`) fires before `Read`, `Bash`, and `WebFetch` tool calls.
 
-**OpenCode** — Plugin interceptor (`plugins/rlm-interceptor.ts`) uses `tool.execute.before` to block large file reads automatically.
+**OpenCode** — Plugin interceptor (`plugins/rlm-interceptor.ts`) uses `tool.execute.before` to silently rewrite large file reads into metadata scripts via `output.args` modification.
 
 Both platforms:
-- Block reading files >5KB directly — redirect to RLM protocol
+- Rewrite reads of files >5KB into metadata summaries (size, head/tail preview, protocol instructions)
 - Detect large-output commands (`cat`, `grep -r`, `curl`, `Get-Content`, `Select-String`, etc.)
-- Block WebFetch — redirect to python download + process
+- Redirect WebFetch to python urllib download + process
 - Log events to `~/.rlm/stats/events.jsonl` for the token savings dashboard
 
 ## Project Structure
@@ -100,7 +112,9 @@ rlm-skill/
 │   │   ├── rlm.md             # /rlm command for OpenCode
 │   │   └── rlm-stats.md       # /rlm-stats command for OpenCode
 │   └── plugins/
-│       └── rlm-interceptor.ts # Auto-intercepts large file reads
+│       ├── rlm-interceptor.ts  # Intercept + rewrite + custom tools
+│       ├── rlm-store.ts        # FTS5 knowledge base (SQLite)
+│       └── rlm-executor.ts     # Sandbox subprocess executor
 ├── hooks/
 │   ├── hooks.json             # Hook configuration
 │   └── pretooluse-rlm.mjs    # Large-file detection hook
@@ -129,7 +143,22 @@ Traditional:  LLM(prompt + 500MB_data) → burns entire context window
 RLM pattern:  LLM writes code → code runs on data → only stdout enters context
 ```
 
+The OpenCode plugin adds three layers:
+1. **Interceptor** — silently rewrites `Read`/`Bash`/`WebFetch` calls that would dump large data into context
+2. **Knowledge Base** — FTS5 SQLite with porter+trigram dual tables for indexing and searching large content
+3. **Sandbox Executor** — isolated subprocess execution, only stdout returns to the model
+
 For most tasks, writing code to process data externally is faster, cheaper, and equally accurate. The `rlm-cli` tool adds recursive sub-LLM decomposition for truly massive datasets (50MB+).
+
+## Benchmarks
+
+Tested with OpenCode 1.2.15 on OpenRouter:
+
+| Test | File Size | Tokens Used | Without RLM (est.) | Savings |
+|------|-----------|-------------|---------------------|---------|
+| JSON analysis | 121 KB | 24,670 | ~30K+ (file in context) | Blocked read, used python |
+| Multi-query analysis | 978 KB | 28,557 | ~250K+ (file in context) | 89%+ reduction |
+| Web fetch + summarize | ~15 KB | 73,912 | Similar (small file) | WebFetch redirected |
 
 ## Credits
 
@@ -137,7 +166,7 @@ This project builds on the work of:
 
 - **[Alex Zhang, Tim Kraska, Omar Khattab](https://github.com/alexzhang13/rlm)** — MIT's RLM paper and official library ([arXiv:2512.24601](https://arxiv.org/abs/2512.24601))
 - **[Mitko Vasilev (@mitkox)](https://github.com/mitkox)** — [RLMGW](https://github.com/mitkox/rlmgw) (RLM Gateway), demonstrating the local vLLM + Claude Code + REPL brain stack that inspired this skill
-- **[Mert Koseoglu (@mksglu)](https://github.com/mksglu/claude-context-mode)** — [context-mode](https://github.com/mksglu/claude-context-mode) plugin for Claude Code, which implements the sandbox/REPL execution that keeps raw data out of context
+- **[Mert Koseoglu (@mksglu)](https://github.com/mksglu/claude-context-mode)** — [context-mode](https://github.com/mksglu/claude-context-mode) plugin for Claude Code, which implements the sandbox/REPL execution and FTS5 knowledge base patterns that inspired the OpenCode plugin architecture
 
 ## License
 

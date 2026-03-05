@@ -113,6 +113,45 @@ def test_hooks_use_plugin_root_var():
                         f"Hook command must use ${{CLAUDE_PLUGIN_ROOT}} for portability: {hook['command']}"
 
 
+def test_opencode_store_exists():
+    store = PLUGIN_ROOT / ".opencode" / "plugins" / "rlm-store.ts"
+    assert store.exists(), "rlm-store.ts must exist for FTS5 knowledge base"
+    content = store.read_text()
+    assert "ContentStore" in content, "Must export ContentStore class"
+    assert "fts5" in content.lower(), "Must use FTS5"
+
+
+def test_opencode_executor_exists():
+    executor = PLUGIN_ROOT / ".opencode" / "plugins" / "rlm-executor.ts"
+    assert executor.exists(), "rlm-executor.ts must exist for sandbox execution"
+    content = executor.read_text()
+    assert "execute" in content, "Must export execute function"
+    assert "execSync" in content, "Must use child_process execSync"
+
+
+def test_opencode_interceptor_no_throws():
+    interceptor = PLUGIN_ROOT / ".opencode" / "plugins" / "rlm-interceptor.ts"
+    assert interceptor.exists(), "rlm-interceptor.ts must exist"
+    content = interceptor.read_text()
+    assert 'throw new Error("[RLM]' not in content, \
+        "Interceptor must NOT throw errors — use output.args rewriting instead"
+
+
+def test_opencode_interceptor_has_tools():
+    interceptor = PLUGIN_ROOT / ".opencode" / "plugins" / "rlm-interceptor.ts"
+    content = interceptor.read_text()
+    assert "rlm_execute" in content, "Must register rlm_execute tool"
+    assert "rlm_search" in content, "Must register rlm_search tool"
+    assert "rlm_index" in content, "Must register rlm_index tool"
+
+
+def test_opencode_package_has_sqlite():
+    pkg = PLUGIN_ROOT / ".opencode" / "package.json"
+    data = json.loads(pkg.read_text())
+    assert "better-sqlite3" in data.get("dependencies", {}), \
+        "package.json must include better-sqlite3"
+
+
 def test_readme_exists():
     readme = PLUGIN_ROOT / "README.md"
     assert readme.exists(), "README.md must exist"
