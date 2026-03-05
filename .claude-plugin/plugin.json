@@ -1,7 +1,7 @@
 {
   "name": "rlm",
   "description": "RLM (Recursive Language Model) \u2014 large-context analysis via REPL pattern. Based on MIT's RLM paper (arXiv:2512.24601). Automatically detects large files and suggests the optimal RLM pattern.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": {
     "name": "Omar"
   },
@@ -16,5 +16,11 @@
     "token-savings",
     "context-window"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "mcpServers": {
+    "rlm": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"]
+    }
+  }
 }

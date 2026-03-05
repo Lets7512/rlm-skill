@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * PreToolUse hook: detects large file/output scenarios and blocks WebFetch.
+ * PreToolUse hook v2: silently rewrites large file reads into metadata scripts
+ * and redirects WebFetch to python download.
  *
  * Fires before Read/Bash/WebFetch tool calls.
- * - Read/Bash: suggests RLM pattern for large files (additionalContext)
- * - WebFetch: blocks entirely and suggests Python fetch instead
+ * - Read: rewrites to Bash with python metadata script (updatedInput)
+ * - Bash: adds advisory context for large-output commands (additionalContext)
+ * - WebFetch: blocks and suggests python fetch (decision: block)
  *
- * Node 12+ compatible: no optional chaining, no nullish coalescing,
- * no top-level await, classic function syntax.
+ * Node 12+ compatible: no optional chaining, no nullish coalescing.
  */
 
 import fs from "fs";
@@ -20,13 +21,12 @@ var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 
 var SIZE_THRESHOLDS = {
-  SINGLE_PASS: 5 * 1024,            // 5 KB — steps 1-3
-  FULL_PROTOCOL: 500 * 1024,        // 500 KB — full 6-step protocol
-  RLM_CLI: 50 * 1024 * 1024,        // 50 MB — rlm-cli
+  SINGLE_PASS: 5 * 1024,
+  FULL_PROTOCOL: 500 * 1024,
+  RLM_CLI: 50 * 1024 * 1024,
 };
 
 var LARGE_OUTPUT_COMMANDS = [
-  // Unix
   /\bcat\b/,
   /\bhead\s+-n\s+\d{4,}/,
   /\btail\s+-n\s+\d{4,}/,
@@ -36,7 +36,6 @@ var LARGE_OUTPUT_COMMANDS = [
   /\bwc\s+-l/,
   /\bcurl\b/,
   /\bwget\b/,
-  // PowerShell / Windows
   /\bGet-Content\b/i,
   /\btype\s+/,
   /\bSelect-String\b/i,
@@ -59,34 +58,22 @@ function suggestPattern(sizeBytes) {
   return 0;
 }
 
-function logEvent(filePath, sizeBytes, pattern) {
+function logEvent(event, details) {
   try {
     var statsDir = path.join(os.homedir(), ".rlm", "stats");
     fs.mkdirSync(statsDir, { recursive: true });
-    var entry = JSON.stringify({
-      ts: new Date().toISOString(),
-      event: "large_file_detected",
-      file: filePath,
-      size_bytes: sizeBytes,
-      pattern: pattern,
-    });
+    var entry = JSON.stringify(Object.assign({ ts: new Date().toISOString(), event: event }, details));
     fs.appendFileSync(path.join(statsDir, "events.jsonl"), entry + "\n");
-  } catch (e) {
-    // Stats logging is best-effort
-  }
+  } catch (e) {}
 }
 
-function patternAdvice(pattern, sizeStr, filePath) {
-  switch (pattern) {
-    case 1:
-      return "File is " + sizeStr + ". Use RLM Protocol steps 1-3: METADATA (assess type/size/preview) -> PEEK (sample head/tail/slices) -> SEARCH (targeted extraction). Write python3 -c scripts via Bash. Use Glob for file discovery, not find. WebFetch is blocked — download via python3 urllib instead. Log each step via stats.log_event().";
-    case 2:
-      return "File is " + sizeStr + ". Use FULL RLM Protocol (6 steps): METADATA -> PEEK -> SEARCH -> ANALYZE (spawn up to 15 sub-agents for parallel chunk analysis) -> SYNTHESIZE -> SUBMIT. Budget: 20 iterations, 15K chars/step, 15 sub-queries max. Use Glob for file discovery. WebFetch is blocked. End with explicit SUBMIT block including confidence level. Log each step via stats.log_event().";
-    case 3:
-      return "File is " + sizeStr + ". Use FULL RLM Protocol + rlm-cli for sub-LLM decomposition: rlm-cli query \"...\" --file " + filePath + " --stats. Also run 6-step protocol for overview. Use Glob for file discovery. WebFetch is blocked. End with SUBMIT block. Log each step via stats.log_event().";
-    default:
-      return null;
-  }
+function buildMetadataScript(filePath, sizeStr, pattern) {
+  var escaped = filePath.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  var protocolHint = pattern >= 2
+    ? "Use FULL RLM Protocol (6 steps): METADATA->PEEK->SEARCH->ANALYZE->SYNTHESIZE->SUBMIT. Use rlm_execute, rlm_index, rlm_search MCP tools."
+    : "Use RLM Protocol steps 1-3: METADATA->PEEK->SEARCH. Use rlm_execute MCP tool or python -c via Bash.";
+
+  return "python -c \"\nimport os\nf = '" + escaped + "'\nsize = os.path.getsize(f)\nwith open(f, 'rb') as fh:\n    head = fh.read(500).decode('utf-8', errors='replace')\n    fh.seek(max(0, size - 500))\n    tail = fh.read(500).decode('utf-8', errors='replace')\nlines = sum(1 for _ in open(f, 'rb'))\next = os.path.splitext(f)[1]\nprint(f'[RLM METADATA] File: {os.path.basename(f)}')\nprint(f'Size: {size:,} bytes (" + sizeStr + ") | Lines: {lines:,} | Type: {ext}')\nprint(f'--- HEAD (first 500 chars) ---')\nprint(head)\nprint(f'--- TAIL (last 500 chars) ---')\nprint(tail)\nprint()\nprint('" + protocolHint + "')\nprint('Do NOT read the full file into context.')\n\"";
 }
 
 function getPluginRoot() {
@@ -94,9 +81,7 @@ function getPluginRoot() {
 }
 
 function findPython() {
-  // Try candidates in order of preference
   var candidates = ["python3", "python"];
-  // Also check common install paths on Linux/macOS
   var extraPaths = [
     "/usr/bin/python3",
     "/usr/local/bin/python3",
@@ -107,9 +92,7 @@ function findPython() {
     try {
       execSync(candidates[i] + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 });
       return candidates[i];
-    } catch (e) {
-      // broken or missing, try next
-    }
+    } catch (e) {}
   }
 
   for (var j = 0; j < extraPaths.length; j++) {
@@ -118,41 +101,26 @@ function findPython() {
         execSync(extraPaths[j] + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 });
         return extraPaths[j];
       }
-    } catch (e) {
-      // broken or missing
-    }
+    } catch (e) {}
   }
 
-  // Also scan /opt for Python installations
   try {
     var optEntries = fs.readdirSync("/opt");
     for (var k = 0; k < optEntries.length; k++) {
       if (/^[Pp]ython/.test(optEntries[k])) {
         var pyBin = "/opt/" + optEntries[k] + "/python";
         if (fs.existsSync(pyBin)) {
-          try {
-            execSync(pyBin + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 });
-            return pyBin;
-          } catch (e) {
-            // broken
-          }
+          try { execSync(pyBin + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 }); return pyBin; } catch (e) {}
         }
         var pyBin3 = "/opt/" + optEntries[k] + "/bin/python3";
         if (fs.existsSync(pyBin3)) {
-          try {
-            execSync(pyBin3 + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 });
-            return pyBin3;
-          } catch (e) {
-            // broken
-          }
+          try { execSync(pyBin3 + ' -c "print(1)"', { stdio: "pipe", timeout: 3000 }); return pyBin3; } catch (e) {}
         }
       }
     }
-  } catch (e) {
-    // /opt doesn't exist or not readable
-  }
+  } catch (e) {}
 
-  return "python3"; // fallback, hope for the best
+  return "python3";
 }
 
 function handleRead(input) {
@@ -167,12 +135,24 @@ function handleRead(input) {
     var pattern = suggestPattern(stat.size);
     if (pattern === 0) return null;
 
-    logEvent(filePath, stat.size, pattern);
-    var advice = patternAdvice(pattern, formatSize(stat.size), filePath);
+    logEvent("rlm_intercept_rewrite", {
+      file: filePath,
+      size_bytes: stat.size,
+      pattern: pattern,
+      original_tool: "Read",
+    });
+
+    // Silently rewrite Read -> Bash with metadata script
     return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        additionalContext: "[RLM] " + advice,
+        updatedInput: {
+          tool_name: "Bash",
+          tool_input: {
+            command: buildMetadataScript(resolved, formatSize(stat.size), pattern),
+            description: "RLM: analyze " + path.basename(filePath) + " metadata (" + formatSize(stat.size) + ")",
+          },
+        },
       },
     };
   } catch (e) {
@@ -187,7 +167,7 @@ function handleBash(input) {
 
   var cwd = input.cwd || ".";
 
-  // Track python commands that open() large files (RLM pattern — log for stats, don't block)
+  // Track python commands that open() large files
   if (/\bpython[23]?\b/.test(command)) {
     var openMatches = command.match(/open\s*\(\s*['"]([^'"]+)['"]/g);
     if (openMatches) {
@@ -199,22 +179,18 @@ function handleBash(input) {
             var stat = fs.statSync(resolved);
             var pattern = suggestPattern(stat.size);
             if (pattern > 0) {
-              logEvent(pathMatch[1], stat.size, pattern);
+              logEvent("large_file_detected", { file: pathMatch[1], size_bytes: stat.size, pattern: pattern });
             }
-          } catch (e) {
-            // file doesn't exist or can't stat
-          }
+          } catch (e) {}
         }
       }
     }
   }
 
-  var isLargeOutputCmd = LARGE_OUTPUT_COMMANDS.some(function (re) {
-    return re.test(command);
-  });
+  var isLargeOutputCmd = LARGE_OUTPUT_COMMANDS.some(function (re) { return re.test(command); });
   if (!isLargeOutputCmd) return null;
 
-  // Check if the command targets a specific file we can stat (Unix + PowerShell)
+  // Check if targeting a specific file
   var fileMatch = command.match(/(?:cat|head|tail|type|Get-Content)\s+(?:-[^\s]+\s+)*["']?([^"'\s|>]+)/i);
   if (fileMatch) {
     try {
@@ -222,27 +198,37 @@ function handleBash(input) {
       var fileStat = fs.statSync(resolvedFile);
       var filePattern = suggestPattern(fileStat.size);
       if (filePattern > 0) {
-        logEvent(fileMatch[1], fileStat.size, filePattern);
-        var advice = patternAdvice(filePattern, formatSize(fileStat.size), fileMatch[1]);
+        logEvent("rlm_intercept_rewrite", {
+          file: fileMatch[1],
+          size_bytes: fileStat.size,
+          pattern: filePattern,
+          original_tool: "Bash",
+        });
+
+        // Rewrite to metadata script
         return {
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
-            additionalContext: "[RLM] " + advice,
+            updatedInput: {
+              tool_name: "Bash",
+              tool_input: {
+                command: buildMetadataScript(resolvedFile, formatSize(fileStat.size), filePattern),
+                description: "RLM: analyze " + path.basename(fileMatch[1]) + " metadata (" + formatSize(fileStat.size) + ")",
+              },
+            },
           },
         };
       }
-    } catch (e) {
-      // File doesn't exist or can't stat - fall through
-    }
+    } catch (e) {}
   }
 
-  // Generic large-output warning for commands like find/grep -r/curl/PowerShell equivalents
+  // Advisory for generic large-output commands
   if (/\b(find|grep\s+-r|rg\s+|curl|wget|Get-ChildItem|Select-String|Invoke-WebRequest|Invoke-RestMethod|iwr)\b/i.test(command)) {
     return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         additionalContext:
-          "[RLM] This command may produce large output. Consider writing code to process the data in a sandbox and only print a summary to context.",
+          "[RLM] This command may produce large output. Use rlm_execute MCP tool to run it in a sandbox, or write python -c code to process the data and only print a summary.",
       },
     };
   }
@@ -259,7 +245,7 @@ function handleWebFetch(input) {
   var fetchScript = path.join(pluginRoot, "src", "fetch.py").replace(/\\/g, "/");
   var pythonBin = findPython();
 
-  // Stats logging happens in fetch.py (it knows the actual size)
+  logEvent("rlm_intercept_rewrite", { original_tool: "WebFetch", url: url.slice(0, 200) });
 
   var reason = [
     "[RLM] WebFetch dumps raw content into context — blocked.",
@@ -268,14 +254,8 @@ function handleWebFetch(input) {
     "",
     '  ' + pythonBin + ' "' + fetchScript + '" "' + url + '"',
     "",
-    "Then process the downloaded file:",
-    "",
-    '  ' + pythonBin + ' -c "',
-    "  with open('<output_path>') as f:",
-    "      data = f.read()",
-    "  # extract what you need",
-    "  print(summary)",
-    '  "',
+    "Then use rlm_index to index the downloaded file, and rlm_search to query it.",
+    "Or use rlm_execute to run python code that processes the file.",
   ].join("\n");
 
   return {
@@ -307,9 +287,7 @@ function main() {
       if (result) {
         process.stdout.write(JSON.stringify(result));
       }
-    } catch (e) {
-      // Silent failure
-    }
+    } catch (e) {}
     process.exit(0);
   });
 }

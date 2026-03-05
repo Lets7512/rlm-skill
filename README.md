@@ -61,15 +61,17 @@ Check token savings:
 /rlm:stats
 ```
 
-### Custom Tools (OpenCode)
+### Custom Tools (Both Platforms)
 
-The plugin registers three custom tools available to the model:
+The plugin provides MCP tools (Claude Code) and custom tools (OpenCode):
 
 | Tool | Purpose |
 |------|---------|
 | `rlm_execute` | Run code in a sandboxed subprocess (python/js/shell). Only stdout enters context. |
+| `rlm_execute_file` | Run code against a file. Content loaded as `FILE_CONTENT` variable, never enters context. |
 | `rlm_index` | Index file content into an FTS5 knowledge base for later search. |
 | `rlm_search` | Search indexed content with BM25 ranking + 3-layer fallback (porter/trigram/fuzzy). |
+| `rlm_stats` | Show knowledge base statistics. |
 
 ### CLI Tool
 
@@ -115,9 +117,12 @@ rlm-skill/
 │       ├── rlm-interceptor.ts  # Intercept + rewrite + custom tools
 │       ├── rlm-store.ts        # FTS5 knowledge base (SQLite)
 │       └── rlm-executor.ts     # Sandbox subprocess executor
+├── mcp/
+│   ├── server.mjs             # MCP server (rlm_execute/search/index)
+│   └── store.mjs              # FTS5 knowledge base (shared)
 ├── hooks/
 │   ├── hooks.json             # Hook configuration
-│   └── pretooluse-rlm.mjs    # Large-file detection hook
+│   └── pretooluse-rlm.mjs    # Silent rewrite hook (updatedInput)
 ├── skills/
 │   ├── rlm/
 │   │   └── SKILL.md           # Skill instructions

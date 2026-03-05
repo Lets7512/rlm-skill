@@ -145,6 +145,36 @@ def test_opencode_interceptor_has_tools():
     assert "rlm_index" in content, "Must register rlm_index tool"
 
 
+def test_mcp_server_exists():
+    server = PLUGIN_ROOT / "mcp" / "server.mjs"
+    assert server.exists(), "MCP server must exist at mcp/server.mjs"
+    content = server.read_text()
+    assert "rlm_execute" in content, "MCP server must provide rlm_execute tool"
+    assert "rlm_search" in content, "MCP server must provide rlm_search tool"
+    assert "rlm_index" in content, "MCP server must provide rlm_index tool"
+
+
+def test_mcp_store_exists():
+    store = PLUGIN_ROOT / "mcp" / "store.mjs"
+    assert store.exists(), "FTS5 store must exist at mcp/store.mjs"
+    content = store.read_text()
+    assert "ContentStore" in content, "Must export ContentStore class"
+    assert "fts5" in content.lower(), "Must use FTS5"
+
+
+def test_plugin_json_has_mcp():
+    manifest = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
+    data = json.loads(manifest.read_text())
+    assert "mcpServers" in data, "plugin.json must declare mcpServers"
+    assert "rlm" in data["mcpServers"], "Must have 'rlm' MCP server"
+
+
+def test_hook_no_throws():
+    hook = PLUGIN_ROOT / "hooks" / "pretooluse-rlm.mjs"
+    content = hook.read_text()
+    assert "updatedInput" in content, "Hook must use updatedInput for silent rewriting"
+
+
 def test_opencode_package_has_sqlite():
     pkg = PLUGIN_ROOT / ".opencode" / "package.json"
     data = json.loads(pkg.read_text())

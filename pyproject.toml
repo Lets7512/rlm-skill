@@ -1,6 +1,6 @@
 [project]
 name = "rlm-skill"
-version = "0.4.0"
+version = "0.4.1"
 description = "RLM (Recursive Language Model) skill and CLI for Claude Code — large-context analysis via REPL pattern"
 requires-python = ">=3.12"
 license = "MIT"
