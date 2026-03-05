@@ -1,0 +1,13 @@
+{
+  "name": "rlm",
+  "description": "RLM (Recursive Language Model) — large-context analysis via REPL pattern. Based on MIT's RLM paper (arXiv:2512.24601). Automatically detects large files and suggests the optimal RLM pattern.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Omar"
+  },
+  "homepage": "https://github.com/lets7512/rlm-skill",
+  "repository": "https://github.com/lets7512/rlm-skill",
+  "license": "MIT",
+  "keywords": ["rlm", "large-context", "repl", "data-analysis", "token-savings", "context-window"],
+  "skills": "./skills/"
+}

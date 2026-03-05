@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.uv/
+uv.lock
+results*.json
+# Cloned repos used for benchmarks
+benchmarks/repos/

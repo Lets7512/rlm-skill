@@ -1,0 +1,16 @@
+[project]
+name = "rlm-skill"
+version = "0.1.0"
+description = "RLM (Recursive Language Model) skill and CLI for Claude Code — large-context analysis via REPL pattern"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "rlms",
+]
+
+[project.scripts]
+rlm-cli = "src.cli:main"
+rlm-stats = "src.stats:main"
+
+[tool.uv.sources]
+rlms = { git = "https://github.com/alexzhang13/rlm.git" }

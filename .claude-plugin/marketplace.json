@@ -1,0 +1,29 @@
+{
+  "name": "rlm-skill",
+  "owner": {
+    "name": "Omar"
+  },
+  "metadata": {
+    "description": "RLM (Recursive Language Model) plugin for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "rlm",
+      "source": "./",
+      "description": "Recursive Language Model pattern — keeps large data out of context by writing code to process it externally. Based on MIT's RLM paper.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Omar"
+      },
+      "category": "development",
+      "keywords": [
+        "rlm",
+        "large-context",
+        "token-savings",
+        "data-analysis",
+        "repl"
+      ]
+    }
+  ]
+}

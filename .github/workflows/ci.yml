@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Validate plugin structure
+        run: pytest tests/test_plugin_structure.py -v
+
+      - name: Validate plugin.json schema
+        run: |
+          python -c "
+          import json, sys
+          data = json.loads(open('.claude-plugin/plugin.json').read())
+          required = ['name', 'version', 'description']
+          missing = [f for f in required if f not in data]
+          if missing:
+              print('Missing fields:', missing)
+              sys.exit(1)
+          print('plugin.json schema OK')
+          "
