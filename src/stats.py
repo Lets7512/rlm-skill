@@ -71,6 +71,7 @@ def compute_stats(events):
         "rlm_peek": 0,
         "rlm_search": 0,
         "rlm_analyze": 0,
+        "rlm_synthesize": 0,
         "rlm_submit": 0,
         "rlm_cli": 0,
     }
@@ -168,6 +169,7 @@ def print_dashboard(stats):
             "rlm_peek": "PEEK",
             "rlm_search": "SEARCH",
             "rlm_analyze": "ANALYZE (sub-queries)",
+            "rlm_synthesize": "SYNTHESIZE",
             "rlm_submit": "SUBMIT",
             "rlm_cli": "CLI (rlm-cli)",
         }

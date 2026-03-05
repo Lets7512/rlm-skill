@@ -135,6 +135,8 @@ Sub-query types:
 
 Combine findings from all sub-queries. Cross-reference. Resolve conflicts. This is reasoning — no code needed unless aggregating data.
 
+Log: `python3 -c "import sys; sys.path.insert(0,'${CLAUDE_PLUGIN_ROOT}/src'); from stats import log_event; log_event('rlm_synthesize','FILE_PATH',SIZE_BYTES,2)"`
+
 ### Step 6: SUBMIT
 
 Always end with an explicit SUBMIT block:
