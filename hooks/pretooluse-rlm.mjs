@@ -20,9 +20,9 @@ var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 
 var SIZE_THRESHOLDS = {
-  SUGGEST_PATTERN_1: 500 * 1024,       // 500 KB
-  SUGGEST_PATTERN_2: 5 * 1024 * 1024,  // 5 MB
-  SUGGEST_PATTERN_3: 50 * 1024 * 1024, // 50 MB
+  SINGLE_PASS: 5 * 1024,            // 5 KB — steps 1-3
+  FULL_PROTOCOL: 500 * 1024,        // 500 KB — full 6-step protocol
+  RLM_CLI: 50 * 1024 * 1024,        // 50 MB — rlm-cli
 };
 
 var LARGE_OUTPUT_COMMANDS = [
@@ -44,9 +44,9 @@ function formatSize(bytes) {
 }
 
 function suggestPattern(sizeBytes) {
-  if (sizeBytes >= SIZE_THRESHOLDS.SUGGEST_PATTERN_3) return 3;
-  if (sizeBytes >= SIZE_THRESHOLDS.SUGGEST_PATTERN_2) return 2;
-  if (sizeBytes >= SIZE_THRESHOLDS.SUGGEST_PATTERN_1) return 1;
+  if (sizeBytes >= SIZE_THRESHOLDS.RLM_CLI) return 3;
+  if (sizeBytes >= SIZE_THRESHOLDS.FULL_PROTOCOL) return 2;
+  if (sizeBytes >= SIZE_THRESHOLDS.SINGLE_PASS) return 1;
   return 0;
 }
 
@@ -67,14 +67,14 @@ function logEvent(filePath, sizeBytes, pattern) {
   }
 }
 
-function patternAdvice(pattern, sizeStr) {
+function patternAdvice(pattern, sizeStr, filePath) {
   switch (pattern) {
     case 1:
-      return "File is " + sizeStr + ". Use RLM Pattern 1: write code to process it in a sandbox/REPL and only print a summary. Don't read the whole file into context.";
+      return "File is " + sizeStr + ". Use RLM Protocol steps 1-3: METADATA (assess type/size/preview) -> PEEK (sample head/tail/slices) -> SEARCH (targeted extraction). Write python3 -c scripts via Bash. Use Glob for file discovery, not find. WebFetch is blocked — download via python3 urllib instead. Log each step via stats.log_event().";
     case 2:
-      return "File is " + sizeStr + ". Use RLM Pattern 2: chain multiple code executions to survey, slice, and deep-dive. Don't read it all at once.";
+      return "File is " + sizeStr + ". Use FULL RLM Protocol (6 steps): METADATA -> PEEK -> SEARCH -> ANALYZE (spawn up to 15 sub-agents for parallel chunk analysis) -> SYNTHESIZE -> SUBMIT. Budget: 20 iterations, 15K chars/step, 15 sub-queries max. Use Glob for file discovery. WebFetch is blocked. End with explicit SUBMIT block including confidence level. Log each step via stats.log_event().";
     case 3:
-      return "File is " + sizeStr + ". Use RLM Pattern 3: rlm-cli with sub-LLM decomposition for this massive dataset. Run: rlm-cli query \"your question\" --file <path>";
+      return "File is " + sizeStr + ". Use FULL RLM Protocol + rlm-cli for sub-LLM decomposition: rlm-cli query \"...\" --file " + filePath + " --stats. Also run 6-step protocol for overview. Use Glob for file discovery. WebFetch is blocked. End with SUBMIT block. Log each step via stats.log_event().";
     default:
       return null;
   }
@@ -159,7 +159,7 @@ function handleRead(input) {
     if (pattern === 0) return null;
 
     logEvent(filePath, stat.size, pattern);
-    var advice = patternAdvice(pattern, formatSize(stat.size));
+    var advice = patternAdvice(pattern, formatSize(stat.size), filePath);
     return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -214,7 +214,7 @@ function handleBash(input) {
       var filePattern = suggestPattern(fileStat.size);
       if (filePattern > 0) {
         logEvent(fileMatch[1], fileStat.size, filePattern);
-        var advice = patternAdvice(filePattern, formatSize(fileStat.size));
+        var advice = patternAdvice(filePattern, formatSize(fileStat.size), fileMatch[1]);
         return {
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
