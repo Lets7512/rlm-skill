@@ -1,7 +1,7 @@
 {
   "name": "rlm",
   "description": "RLM (Recursive Language Model) — large-context analysis via REPL pattern. Based on MIT's RLM paper (arXiv:2512.24601). Automatically detects large files and suggests the optimal RLM pattern.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
     "name": "Omar"
   },

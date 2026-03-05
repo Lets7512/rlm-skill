@@ -227,21 +227,7 @@ function handleWebFetch(input) {
   var fetchScript = path.join(pluginRoot, "src", "fetch.py").replace(/\\/g, "/");
   var pythonBin = findPython();
 
-  // Log the interception
-  try {
-    var statsDir = path.join(os.homedir(), ".rlm", "stats");
-    fs.mkdirSync(statsDir, { recursive: true });
-    var entry = JSON.stringify({
-      ts: new Date().toISOString(),
-      event: "webfetch_blocked",
-      file: url,
-      size_bytes: 0,
-      pattern: 0,
-    });
-    fs.appendFileSync(path.join(statsDir, "events.jsonl"), entry + "\n");
-  } catch (e) {
-    // best-effort
-  }
+  // Stats logging happens in fetch.py (it knows the actual size)
 
   var reason = [
     "[RLM] WebFetch dumps raw content into context — blocked.",

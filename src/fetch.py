@@ -11,9 +11,11 @@ Usage:
 
 import argparse
 import hashlib
+import json
 import os
 import sys
 import tempfile
+from datetime import datetime
 
 
 def md5_short(s):
@@ -73,7 +75,7 @@ def fetch(url, output_path=None, headers=None, timeout=30):
     """Fetch URL to file. Returns metadata dict."""
     headers = headers or {}
     if "User-Agent" not in headers:
-        headers["User-Agent"] = "rlm-fetch/0.2.0"
+        headers["User-Agent"] = "rlm-fetch/0.2.1"
 
     # Try requests first, fall back to urllib
     try:
@@ -105,6 +107,26 @@ def fetch(url, output_path=None, headers=None, timeout=30):
     }
 
 
+def log_stats(url, size_bytes):
+    """Log fetch event to RLM stats for the dashboard."""
+    try:
+        stats_dir = os.path.join(os.path.expanduser("~"), ".rlm", "stats")
+        if not os.path.isdir(stats_dir):
+            os.makedirs(stats_dir)
+        entry = {
+            "ts": datetime.now().isoformat(),
+            "event": "rlm_fetch",
+            "file": url,
+            "size_bytes": size_bytes,
+            "pattern": 1,
+        }
+        stats_file = os.path.join(stats_dir, "events.jsonl")
+        with open(stats_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass  # Stats logging is best-effort
+
+
 def format_size(n):
     if n >= 1024 * 1024:
         return "%.1fMB" % (n / (1024.0 * 1024.0))
@@ -132,6 +154,9 @@ def main():
     except Exception as e:
         print("FETCH FAILED: %s" % str(e), file=sys.stderr)
         sys.exit(1)
+
+    # Log to RLM stats dashboard
+    log_stats(meta["url"], meta["size_bytes"])
 
     # Only this metadata enters context
     print("Fetched: %s" % meta["url"])
