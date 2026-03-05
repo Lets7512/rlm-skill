@@ -21,11 +21,13 @@ claude --plugin-dir /path/to/rlm-skill
 ### OpenCode
 
 ```bash
-# Copy agents and commands to your project or user config
-cp -r .opencode/agents/ .opencode/commands/ ~/.config/opencode/
+# Copy agents, commands, and plugins to your project or user config
+cp -r .opencode/agents/ .opencode/commands/ .opencode/plugins/ ~/.config/opencode/
 
 # Or use from project root (auto-detected from .opencode/)
 ```
+
+The **RLM interceptor plugin** (`plugins/rlm-interceptor.ts`) automatically blocks large file reads and suggests the RLM protocol — no manual invocation needed.
 
 In OpenCode, use `Ctrl+K` then select:
 - `project:rlm` — invoke RLM for large-context tasks
@@ -72,13 +74,17 @@ rlm-cli repl --file /path/to/data.json
 rlm-cli query "Find bugs" --repo . --backend openai --model Qwen/Qwen3-8B --base-url http://localhost:8000/v1
 ```
 
-### Hooks
+### Hooks & Interceptors
 
-The plugin includes a PreToolUse hook that fires before `Read` and `Bash` tool calls:
+**Claude Code** — PreToolUse hook (`hooks/pretooluse-rlm.mjs`) fires before `Read`, `Bash`, and `WebFetch` tool calls.
 
-- Checks file sizes before reading — suggests writing code to process data instead of dumping it into context
-- Detects commands likely to produce large output (`cat`, `grep -r`, `curl`, etc.)
-- Logs events to `~/.rlm/stats/events.jsonl` for the token savings dashboard
+**OpenCode** — Plugin interceptor (`plugins/rlm-interceptor.ts`) uses `tool.execute.before` to block large file reads automatically.
+
+Both platforms:
+- Block reading files >5KB directly — redirect to RLM protocol
+- Detect large-output commands (`cat`, `grep -r`, `curl`, `Get-Content`, `Select-String`, etc.)
+- Block WebFetch — redirect to python download + process
+- Log events to `~/.rlm/stats/events.jsonl` for the token savings dashboard
 
 ## Project Structure
 
@@ -90,9 +96,11 @@ rlm-skill/
 ├── .opencode/
 │   ├── agents/
 │   │   └── rlm.md             # OpenCode agent definition
-│   └── commands/
-│       ├── rlm.md             # /rlm command for OpenCode
-│       └── rlm-stats.md       # /rlm-stats command for OpenCode
+│   ├── commands/
+│   │   ├── rlm.md             # /rlm command for OpenCode
+│   │   └── rlm-stats.md       # /rlm-stats command for OpenCode
+│   └── plugins/
+│       └── rlm-interceptor.ts # Auto-intercepts large file reads
 ├── hooks/
 │   ├── hooks.json             # Hook configuration
 │   └── pretooluse-rlm.mjs    # Large-file detection hook
