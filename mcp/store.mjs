@@ -1,21 +1,47 @@
 /**
  * FTS5 Knowledge Base — porter+trigram dual tables with 3-layer search fallback.
  * Shared between MCP server and hook.
+ *
+ * SQLite backend priority:
+ *   1. node:sqlite (Node 22+, built-in, no install needed)
+ *   2. better-sqlite3 (fallback, requires native compilation)
  */
 
-import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import os from "os";
 
 var DB_PATH = path.join(os.homedir(), ".rlm", "kb", "store.db");
 
+// Resolve SQLite backend
+var DatabaseClass = null;
+var backendName = "none";
+
+try {
+  // Node 22+ built-in sqlite (no install required)
+  var nodeSqlite = await import("node:sqlite");
+  DatabaseClass = nodeSqlite.DatabaseSync;
+  backendName = "node:sqlite";
+} catch (e) {
+  try {
+    var betterSqlite = await import("better-sqlite3");
+    DatabaseClass = betterSqlite.default;
+    backendName = "better-sqlite3";
+  } catch (e2) {
+    // Will throw when ContentStore is instantiated
+  }
+}
+
 export class ContentStore {
   constructor() {
+    if (!DatabaseClass) {
+      throw new Error("No SQLite backend available. Need Node 22+ (node:sqlite) or better-sqlite3.");
+    }
     var dir = path.dirname(DB_PATH);
     fs.mkdirSync(dir, { recursive: true });
-    this.db = new Database(DB_PATH);
-    this.db.pragma("journal_mode = WAL");
+    this.db = new DatabaseClass(DB_PATH);
+    this._backend = backendName;
+    this.db.exec("PRAGMA journal_mode = WAL");
     this._init();
   }
 
@@ -64,13 +90,29 @@ export class ContentStore {
     var insert = this.db.prepare(
       "INSERT INTO chunks (source, chunk_text, chunk_index) VALUES (?, ?, ?)"
     );
-    var tx = this.db.transaction(function (items) {
-      for (var i = 0; i < items.length; i++) {
-        insert.run(source, items[i], i);
+
+    // node:sqlite doesn't have .transaction(), use manual BEGIN/COMMIT
+    if (this._backend === "better-sqlite3") {
+      var tx = this.db.transaction(function (items) {
+        for (var i = 0; i < items.length; i++) {
+          insert.run(source, items[i], i);
+        }
+        return items.length;
+      });
+      return tx(chunks);
+    } else {
+      this.db.exec("BEGIN");
+      try {
+        for (var i = 0; i < chunks.length; i++) {
+          insert.run(source, chunks[i], i);
+        }
+        this.db.exec("COMMIT");
+      } catch (e) {
+        this.db.exec("ROLLBACK");
+        throw e;
       }
-      return items.length;
-    });
-    return tx(chunks);
+      return chunks.length;
+    }
   }
 
   indexFile(filePath, source) {
@@ -127,7 +169,7 @@ export class ContentStore {
         ? (s / 1024 / 1024).toFixed(1) + "MB"
         : (s / 1024).toFixed(1) + "KB";
     } catch (e) {}
-    return { sources: sources, chunks: chunks, dbSize: dbSize };
+    return { sources: sources, chunks: chunks, dbSize: dbSize, backend: this._backend };
   }
 
   /**

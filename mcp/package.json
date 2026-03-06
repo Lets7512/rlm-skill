@@ -1,9 +1,11 @@
 {
   "name": "rlm-mcp-server",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "type": "module",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "optionalDependencies": {
     "better-sqlite3": "^11.0.0"
   }
 }

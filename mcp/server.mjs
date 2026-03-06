@@ -129,11 +129,22 @@ function htmlToText(html) {
   return text;
 }
 
-// Initialize
-var store = new ContentStore();
+// Initialize — store may be null if no SQLite backend available
+var store = null;
+try {
+  store = new ContentStore();
+} catch (e) {
+  process.stderr.write("RLM MCP: Knowledge base unavailable (" + e.message + "). Execute tools still work.\n");
+}
+
+function requireStore() {
+  if (!store) throw new Error("Knowledge base unavailable. Need Node 22+ (built-in sqlite) or better-sqlite3. Execute tools still work.");
+  return store;
+}
+
 var server = new McpServer({
   name: "rlm",
-  version: "0.4.0",
+  version: "0.4.4",
 });
 
 // Tool: rlm_execute
@@ -209,13 +220,13 @@ server.tool(
     logEvent("rlm_index", { source: args.source, path: args.filePath });
     var count;
     if (args.filePath) {
-      count = store.indexFile(args.filePath, args.source);
+      count = requireStore().indexFile(args.filePath, args.source);
     } else if (args.content) {
-      count = store.index(args.source, args.content);
+      count = requireStore().index(args.source, args.content);
     } else {
       return { content: [{ type: "text", text: "Error: provide either 'filePath' or 'content'" }] };
     }
-    var s = store.stats();
+    var s = requireStore().stats();
     return {
       content: [{
         type: "text",
@@ -235,7 +246,7 @@ server.tool(
   },
   function (args) {
     logEvent("rlm_search", { queries: args.queries, source: args.source });
-    var results = store.searchWithSnippets(args.queries, args.source);
+    var results = requireStore().searchWithSnippets(args.queries, args.source);
     if (results.length === 0) {
       return { content: [{ type: "text", text: "No results found." }] };
     }
@@ -276,7 +287,7 @@ server.tool(
 
     // Run search queries
     if (args.queries && args.queries.length > 0) {
-      var results = store.searchWithSnippets(args.queries, args.source);
+      var results = requireStore().searchWithSnippets(args.queries, args.source);
       if (results.length === 0) {
         parts.push("=== Search ===\nNo results found.");
       } else {
@@ -313,8 +324,8 @@ server.tool(
         content = htmlToText(content);
       }
 
-      var count = store.index(args.source, content);
-      var s = store.stats();
+      var count = requireStore().index(args.source, content);
+      var s = requireStore().stats();
       var sizeStr = content.length >= 1024 ? (content.length / 1024).toFixed(1) + "KB" : content.length + "B";
 
       return {
@@ -337,7 +348,7 @@ server.tool(
   "Show RLM knowledge base statistics.",
   {},
   function () {
-    var s = store.stats();
+    var s = requireStore().stats();
     return {
       content: [{
         type: "text",
